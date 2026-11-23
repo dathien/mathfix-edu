@@ -1,0 +1,6 @@
+{
+  "name": "MathFix EDU",
+  "description": "Công cụ sửa lỗi và chuẩn hóa công thức Toán – Vật lí – Hóa học. Sao chép – Chuyển đổi – Chỉnh sửa – Sử dụng ngay.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="112" fill="#0B4F8A"/>
+  <rect x="32" y="32" width="448" height="448" rx="84" stroke="#38BDF8" stroke-opacity="0.28" stroke-width="6"/>
+  <!-- Stylized Radical & Integral + Checkmark symbol -->
+  <path d="M92 276L144 374L214 148H412" stroke="#FFFFFF" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M254 242L346 334M346 242L254 334" stroke="#7DD3FC" stroke-width="26" stroke-linecap="round"/>
+  <circle cx="392" cy="368" r="56" fill="#059669"/>
+  <path d="M366 368L384 386L420 350" stroke="#FFFFFF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
