@@ -236,11 +236,11 @@ export function normalizeExamText(
 }
 
 function cleanSpacesOutsideMath(line: string): string {
-  // Split around delimited math ($...$, $$...$$, \(...\), \[...\]) so math spacing is untouched
-  const tokens = line.split(/(\$\$[\s\S]*?\$\$|\$[^$]+\$|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\])/g);
+  // Split around delimited math ($...$, $$...$$, \(...\), \[...\]) and embedded figure tokens [[HINH:...]]
+  const tokens = line.split(/(\$\$[\s\S]*?\$\$|\$[^$]+\$|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]|\[\[HINH:[a-zA-Z0-9_-]+\]\])/g);
   return tokens
     .map((tok, i) => {
-      if (i % 2 === 1) return tok; // inside delimited math
+      if (i % 2 === 1) return tok; // inside delimited math or figure token
       return tok
         .replace(/[ \t]{2,}/g, ' ')
         .replace(/\s+([,;:.!?])(?!\d)/g, '$1');
@@ -355,11 +355,13 @@ export function formatMultipleChoiceOptions(
 
     if (isValidABCD) {
       blocksFormatted++;
+      const hasFigureToken = collected.some((o) => /\[\[HINH:[a-zA-Z0-9_-]+\]\]/.test(o.body));
       const maxLen = Math.max(...collected.map((o) => o.body.length));
-      // Smart auto-wrap guard when options are long
+      // Smart auto-wrap guard when options are long or contain figures
       let effectiveCols: OptionLayoutColumns = columns;
+      if (hasFigureToken && columns === 4) effectiveCols = 2;
       if (columns === 4 && maxLen > 24) effectiveCols = 2;
-      if (effectiveCols === 2 && maxLen > 52) effectiveCols = 1;
+      if (!hasFigureToken && effectiveCols === 2 && maxLen > 52) effectiveCols = 1;
 
       if (effectiveCols === 1) {
         for (const o of collected) {

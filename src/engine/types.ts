@@ -57,7 +57,14 @@ export interface FormulaSegment {
   errorMessage?: string;
 }
 
-export type InlineSegment = TextSegment | FormulaSegment;
+export interface FigureSegment {
+  id: string;
+  type: 'figure';
+  figureId: string;
+  raw: string;
+}
+
+export type InlineSegment = TextSegment | FormulaSegment | FigureSegment;
 
 export interface ParagraphBlock {
   id: string;

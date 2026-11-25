@@ -1,15 +1,24 @@
 import React, { useMemo } from 'react';
 import {
   AlertTriangle,
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
   Check,
   CheckCheck,
   Copy,
+  Download,
   Edit3,
+  Image as ImageIcon,
   RotateCcw,
+  Trash2,
   XCircle,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import {
   DocumentBlock,
+  FigureSegment,
   FormulaSegment,
   FormulaSubject,
   InlineSegment,
@@ -17,19 +26,28 @@ import {
   ProcessedDocument,
   TableBlock,
 } from '../engine/types';
+import { FigureAlignment, FigureAsset } from '../engine/figureTypes';
+import { sanitizeSvgMarkup } from '../engine/svgSanitizer';
 import { buildSelectionExportPair } from '../engine/clipboardExport';
 import { ExamHeaderConfig, ExamStyleSettings, hasAnyHeaderContent } from '../engine/examTools';
 
 interface NormalizedDocumentViewProps {
   document: ProcessedDocument | null;
+  figures?: Map<string, FigureAsset>;
   compareMode: boolean;
   selectedFormulaId: string | null;
+  selectedFigureId?: string | null;
   selectedParagraphId: string | null;
   contentRef?: React.RefObject<HTMLDivElement | null>;
   examStyle?: ExamStyleSettings;
   examHeader?: ExamHeaderConfig;
   zoomPercent?: number;
   onSelectFormula: (formula: FormulaSegment, openEditor: boolean) => void;
+  onSelectFigure?: (figureId: string) => void;
+  onEditFigure?: (figure: FigureAsset) => void;
+  onUpdateFigure?: (figure: FigureAsset) => void;
+  onRemoveFigure?: (figureId: string) => void;
+  onExportFigure?: (figure: FigureAsset, format: 'svg' | 'png') => void;
   onSelectParagraph: (para: ParagraphBlock) => void;
   onCopyParagraph: (para: ParagraphBlock) => void;
   onAcceptFormula: (formulaId: string) => void;
@@ -108,14 +126,21 @@ function getStatusLabel(status: FormulaSegment['status']): string {
 
 export const NormalizedDocumentView: React.FC<NormalizedDocumentViewProps> = ({
   document,
+  figures,
   compareMode,
   selectedFormulaId,
+  selectedFigureId,
   selectedParagraphId,
   contentRef,
   examStyle,
   examHeader,
   zoomPercent = 100,
   onSelectFormula,
+  onSelectFigure,
+  onEditFigure,
+  onUpdateFigure,
+  onRemoveFigure,
+  onExportFigure,
   onSelectParagraph,
   onCopyParagraph,
   onAcceptFormula,
@@ -135,6 +160,33 @@ export const NormalizedDocumentView: React.FC<NormalizedDocumentViewProps> = ({
     for (const f of allFormulas) map.set(f.id, f);
     return map;
   }, [allFormulas]);
+
+  // Sequential numbering for figures across the entire document (Hình 1, Hình 2, ...)
+  const figureNumberMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!document) return map;
+    let counter = 0;
+    const visit = (segs: InlineSegment[]) => {
+      for (const s of segs) {
+        if (s.type === 'figure' && !map.has(s.figureId)) {
+          counter += 1;
+          map.set(s.figureId, counter);
+        }
+      }
+    };
+    for (const b of document.blocks) {
+      if (b.type === 'paragraph') {
+        visit(b.segments);
+      } else {
+        for (const r of b.rows) {
+          for (const c of r) {
+            for (const p of c.paragraphs) visit(p.segments);
+          }
+        }
+      }
+    }
+    return map;
+  }, [document]);
 
   if (!document || document.blocks.length === 0) {
     return (
@@ -245,6 +297,198 @@ export const NormalizedDocumentView: React.FC<NormalizedDocumentViewProps> = ({
     );
   };
 
+  const renderFigureNode = (seg: FigureSegment, inTable = false) => {
+    const fig = figures?.get(seg.figureId);
+    if (!fig) {
+      return (
+        <span
+          key={seg.id}
+          className="my-1 inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800"
+        >
+          <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>Hình chưa tìm thấy ({seg.figureId})</span>
+        </span>
+      );
+    }
+
+    const isSelected = selectedFigureId === fig.id;
+    const figNum = figureNumberMap.get(fig.id) ?? 1;
+    const alignClass =
+      fig.align === 'left'
+        ? 'items-start text-left'
+        : fig.align === 'right'
+        ? 'items-end text-right'
+        : 'items-center text-center';
+    const safeSvg =
+      fig.kind !== 'raster_upload' && fig.svgMarkup
+        ? sanitizeSvgMarkup(fig.svgMarkup)
+        : '';
+    const widthLimit = inTable ? Math.min(fig.widthPx, 280) : fig.widthPx;
+    const captionLine = fig.showNumber
+      ? fig.caption?.trim()
+        ? `Hình ${figNum}. ${fig.caption.trim()}`
+        : `Hình ${figNum}.`
+      : fig.caption?.trim() || '';
+
+    const updateAlign = (align: FigureAlignment) => {
+      onUpdateFigure?.({ ...fig, align, updatedAt: Date.now() });
+    };
+    const updateWidth = (delta: number) => {
+      const nextWidth = Math.max(140, Math.min(680, Math.round(fig.widthPx + delta)));
+      onUpdateFigure?.({ ...fig, widthPx: nextWidth, updatedAt: Date.now() });
+    };
+
+    return (
+      <figure
+        key={seg.id}
+        data-figure-id={fig.id}
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelectFigure?.(fig.id);
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          onSelectFigure?.(fig.id);
+          onEditFigure?.(fig);
+        }}
+        className={`break-inside-avoid my-2.5 flex flex-col ${alignClass}`}
+      >
+        <div
+          className={`group/fig relative inline-flex flex-col items-center rounded-lg border p-2 transition-all bg-white ${
+            isSelected
+              ? 'border-[#0B4F8A] ring-2 ring-[#0B4F8A]/30 shadow-xs'
+              : 'border-slate-200 hover:border-[#0B4F8A]/60'
+          }`}
+          style={{ width: `${widthLimit}px`, maxWidth: '100%' }}
+        >
+          {/* Floating compact controls (never printed) */}
+          <div
+            className={`no-print mb-1.5 flex flex-wrap items-center justify-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-1 text-xs transition-opacity ${
+              isSelected ? 'opacity-100' : 'opacity-0 group-hover/fig:opacity-100 focus-within:opacity-100'
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {onEditFigure && (
+              <button
+                type="button"
+                onClick={() => onEditFigure(fig)}
+                title="Mở trình chỉnh sửa cho hình này"
+                className="inline-flex items-center gap-1 rounded bg-[#0B4F8A] px-2 py-0.5 font-medium text-white hover:bg-[#093F6F] cursor-pointer"
+              >
+                <Edit3 className="h-3 w-3" />
+                <span>Sửa hình</span>
+              </button>
+            )}
+            {onUpdateFigure && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => updateAlign('left')}
+                  title="Căn trái"
+                  className={`rounded p-1 cursor-pointer ${
+                    fig.align === 'left' ? 'bg-sky-100 text-[#0B4F8A]' : 'text-slate-600 hover:bg-white'
+                  }`}
+                >
+                  <AlignLeft className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateAlign('center')}
+                  title="Căn giữa"
+                  className={`rounded p-1 cursor-pointer ${
+                    fig.align === 'center' ? 'bg-sky-100 text-[#0B4F8A]' : 'text-slate-600 hover:bg-white'
+                  }`}
+                >
+                  <AlignCenter className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateAlign('right')}
+                  title="Căn phải"
+                  className={`rounded p-1 cursor-pointer ${
+                    fig.align === 'right' ? 'bg-sky-100 text-[#0B4F8A]' : 'text-slate-600 hover:bg-white'
+                  }`}
+                >
+                  <AlignRight className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateWidth(-40)}
+                  title="Thu nhỏ hình"
+                  className="rounded p-1 text-slate-600 hover:bg-white cursor-pointer"
+                >
+                  <ZoomOut className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateWidth(40)}
+                  title="Phóng to hình"
+                  className="rounded p-1 text-slate-600 hover:bg-white cursor-pointer"
+                >
+                  <ZoomIn className="h-3.5 w-3.5" />
+                </button>
+              </>
+            )}
+            {onExportFigure && safeSvg && (
+              <button
+                type="button"
+                onClick={() => onExportFigure(fig, 'svg')}
+                title="Tải xuống SVG"
+                className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-slate-700 hover:bg-white cursor-pointer"
+              >
+                <Download className="h-3 w-3" />
+                <span>SVG</span>
+              </button>
+            )}
+            {onExportFigure && (
+              <button
+                type="button"
+                onClick={() => onExportFigure(fig, 'png')}
+                title="Tải xuống PNG"
+                className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-slate-700 hover:bg-white cursor-pointer"
+              >
+                <Download className="h-3 w-3" />
+                <span>PNG</span>
+              </button>
+            )}
+            {onRemoveFigure && (
+              <button
+                type="button"
+                onClick={() => onRemoveFigure(fig.id)}
+                title="Xóa hình khỏi câu hỏi"
+                className="rounded p-1 text-red-600 hover:bg-red-50 cursor-pointer"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Visual Surface */}
+          {safeSvg ? (
+            <div
+              className="w-full [&>svg]:w-full [&>svg]:h-auto [&>svg]:block"
+              dangerouslySetInnerHTML={{ __html: safeSvg }}
+            />
+          ) : fig.pngDataUrl ? (
+            <img
+              src={fig.pngDataUrl}
+              alt={fig.caption || fig.title || 'Hình minh họa khoa học'}
+              className="w-full h-auto block rounded"
+            />
+          ) : (
+            <div className="py-6 text-xs text-slate-500">Không có dữ liệu hiển thị hình ảnh</div>
+          )}
+
+          {captionLine && (
+            <figcaption className="mt-1.5 text-[0.88em] italic text-slate-700 leading-snug">
+              {captionLine}
+            </figcaption>
+          )}
+        </div>
+      </figure>
+    );
+  };
+
   const renderParagraph = (para: ParagraphBlock, inTable = false) => {
     if (para.segments.length === 0) {
       return <div key={para.id} className="h-3" aria-hidden="true" />;
@@ -284,6 +528,9 @@ export const NormalizedDocumentView: React.FC<NormalizedDocumentViewProps> = ({
                 );
               }
               return <React.Fragment key={seg.id}>{seg.text}</React.Fragment>;
+            }
+            if (seg.type === 'figure') {
+              return renderFigureNode(seg, inTable);
             }
             return renderFormulaNode(seg);
           })}

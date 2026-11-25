@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BookMarked,
   BookOpen,
@@ -12,6 +12,7 @@ import {
   Maximize2,
   Minimize2,
   PenTool,
+  Shapes,
   WifiOff,
   XCircle,
   ZoomIn,
@@ -86,6 +87,32 @@ import { PrintPreviewPanel } from './components/PrintPreviewPanel';
 import { GuideView } from './components/GuideView';
 import { PWAInstallControl } from './components/PWAInstallControl';
 import { useOnlineStatus, usePWAInstall } from './hooks/usePWAInstall';
+import {
+  DEFAULT_FIGURE_CROP,
+  FigureAsset,
+  FigureLibraryTemplate,
+} from './engine/figureTypes';
+import {
+  deleteCustomFigureTemplate,
+  FigureRecentEntry,
+  generateFigureId,
+  loadAllFigures,
+  loadFigureLibraryState,
+  recordRecentFigureTemplate,
+  saveCustomFigureTemplate,
+  saveFigureAsset,
+  saveFigureFavoriteIds,
+} from './engine/figureStorage';
+import {
+  getSvgDimensions,
+  isSupportedImageFile,
+  readRasterImageFile,
+  sanitizeSvgMarkup,
+  svgMarkupToPngDataUrl,
+} from './engine/svgSanitizer';
+import type { DrawingWorkspaceMode } from './components/drawing/DrawingWorkspace';
+
+const DrawingWorkspace = React.lazy(() => import('./components/drawing/DrawingWorkspace'));
 
 interface ToastState {
   message: string;
@@ -170,10 +197,19 @@ export default function App() {
   const [extraWarnings, setExtraWarnings] = useState<string[]>([]);
 
   // Workspace view & Ribbon state
-  const [viewMode, setViewMode] = useState<'workspace' | 'guide'>('workspace');
+  const [viewMode, setViewMode] = useState<'workspace' | 'guide' | 'drawing'>('workspace');
+  const [drawingMode, setDrawingMode] = useState<DrawingWorkspaceMode>('vector_2d');
   const [ribbonTab, setRibbonTab] = useState<RibbonTabId>('clipboard');
   const [ribbonCollapsed, setRibbonCollapsed] = useState<boolean>(false);
   const [activePanel, setActivePanel] = useState<DockedPanelId>('none');
+
+  // Scientific Figures & Figure Library state (IndexedDB v3 offline persistence)
+  const [figuresMap, setFiguresMap] = useState<Map<string, FigureAsset>>(() => new Map());
+  const [selectedFigureId, setSelectedFigureId] = useState<string | null>(null);
+  const [editingFigureId, setEditingFigureId] = useState<string | null>(null);
+  const [customFigureTemplates, setCustomFigureTemplates] = useState<FigureLibraryTemplate[]>([]);
+  const [figureFavoriteIds, setFigureFavoriteIds] = useState<string[]>([]);
+  const [figureRecents, setFigureRecents] = useState<FigureRecentEntry[]>([]);
 
   // Panel-specific states
   const [studioMode, setStudioMode] = useState<'create' | 'edit'>('create');
@@ -215,6 +251,7 @@ export default function App() {
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const libraryImportRef = useRef<HTMLInputElement | null>(null);
   const normalizedContentRef = useRef<HTMLDivElement | null>(null);
   const conversionJobRef = useRef<number>(0);
@@ -229,7 +266,7 @@ export default function App() {
     toastTimerRef.current = window.setTimeout(() => setToast(null), 5000);
   }, []);
 
-  // Load saved local draft availability & Formula Library state on mount
+  // Load saved local draft availability, Formula Library & Scientific Figures on mount
   useEffect(() => {
     loadLocalDraft().then((draft) => {
       if (draft && draft.rawText.trim().length > 0) {
@@ -240,6 +277,16 @@ export default function App() {
       setCustomFormulas(snap.customFormulas);
       setFavoriteIds(snap.favoriteIds);
       setRecentEntries(snap.recentEntries);
+    });
+    loadAllFigures().then((figs) => {
+      if (figs.size > 0) {
+        setFiguresMap(new Map(figs));
+      }
+    });
+    loadFigureLibraryState().then((snap) => {
+      setCustomFigureTemplates(snap.customTemplates);
+      setFigureFavoriteIds(snap.favoriteIds);
+      setFigureRecents(snap.recentEntries);
     });
   }, []);
 
@@ -502,21 +549,123 @@ export default function App() {
     [rawText, sourceType, extraWarnings, updateRawText, runConversion, notify]
   );
 
-  // Structured paste handler on textarea
+  // Import a local or clipboard image file (PNG, JPG, WebP, or strictly sanitized SVG)
+  const importImageFile = useCallback(
+    async (file: File, baseTextOverride?: string) => {
+      const check = isSupportedImageFile(file);
+      if (!check.ok) {
+        notify(check.error || 'Tệp hình ảnh không được hỗ trợ.', 'warning');
+        return null;
+      }
+
+      const isSvg =
+        file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg');
+      const now = Date.now();
+      const baseTitle = file.name.replace(/\.[^.]+$/, '') || 'Hình ảnh tải lên';
+      const defaultSubject: FormulaSubject = subjectMode === 'auto' ? 'math' : subjectMode;
+
+      try {
+        let asset: FigureAsset;
+        if (isSvg) {
+          const rawSvg = await file.text();
+          const cleanSvg = sanitizeSvgMarkup(rawSvg);
+          if (!cleanSvg) {
+            notify(
+              'Tệp SVG không hợp lệ hoặc không chứa nội dung vector an toàn.',
+              'warning'
+            );
+            return null;
+          }
+          const dims = getSvgDimensions(cleanSvg);
+          const pngDataUrl = (await svgMarkupToPngDataUrl(cleanSvg, 1120)) || undefined;
+          asset = {
+            id: generateFigureId(),
+            kind: 'svg_upload',
+            subject: defaultSubject,
+            title: baseTitle,
+            caption: '',
+            showNumber: true,
+            align: 'center',
+            widthPx: Math.min(480, Math.max(220, Math.round(dims.width))),
+            aspectRatio: dims.width > 0 ? dims.height / dims.width : 0.68,
+            rotationDeg: 0,
+            crop: DEFAULT_FIGURE_CROP,
+            svgMarkup: cleanSvg,
+            pngDataUrl,
+            createdAt: now,
+            updatedAt: now,
+          };
+        } else {
+          const raster = await readRasterImageFile(file);
+          asset = {
+            id: generateFigureId(),
+            kind: 'raster_upload',
+            subject: defaultSubject,
+            title: baseTitle,
+            caption: '',
+            showNumber: true,
+            align: 'center',
+            widthPx: Math.min(480, Math.max(200, Math.round(raster.width))),
+            aspectRatio: raster.width > 0 ? raster.height / raster.width : 0.68,
+            rotationDeg: 0,
+            crop: DEFAULT_FIGURE_CROP,
+            pngDataUrl: raster.dataUrl,
+            createdAt: now,
+            updatedAt: now,
+          };
+        }
+
+        await saveFigureAsset(asset);
+        setFiguresMap((prev) => {
+          const next = new Map(prev);
+          next.set(asset.id, asset);
+          return next;
+        });
+        setSelectedFigureId(asset.id);
+
+        const token = `[[HINH:${asset.id}]]`;
+        if (typeof baseTextOverride === 'string') {
+          const merged = `${baseTextOverride}\n${token}\n`;
+          updateRawText(merged, sourceType);
+          runConversion(merged, sourceType, extraWarnings);
+        } else {
+          const ta = textareaRef.current;
+          const pos = ta?.selectionStart ?? rawText.length;
+          const lineStart = rawText.lastIndexOf('\n', Math.max(0, pos - 1)) + 1;
+          const prefixOnLine = rawText.slice(lineStart, pos);
+          const isInsideMcqOption = /^\s*[A-D]\.\s*$/.test(prefixOnLine);
+          insertTextAtCursor(
+            isInsideMcqOption ? token : `\n${token}\n`,
+            isSvg
+              ? `Đã chèn hình vector SVG "${file.name}" vào tài liệu.`
+              : `Đã chèn hình ảnh "${file.name}" vào câu hỏi. Nhấp vào hình để căn lề, cắt hoặc thay đổi kích thước.`
+          );
+        }
+        setMobileTab('result');
+        return asset;
+      } catch (err) {
+        notify(
+          err instanceof Error ? `Không thể đọc hình ảnh: ${err.message}` : 'Không thể đọc tệp hình ảnh đã chọn.',
+          'warning'
+        );
+        return null;
+      }
+    },
+    [subjectMode, sourceType, extraWarnings, rawText, updateRawText, runConversion, insertTextAtCursor, notify]
+  );
+
+  // Structured paste handler on textarea (supports text, formulas, images, and mixed content)
   const handleTextareaPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const html = e.clipboardData.getData('text/html');
     const plain = e.clipboardData.getData('text/plain');
-    const hasImageOnly =
-      !html &&
-      !plain &&
-      Array.from(e.clipboardData.items).some((i) => i.type.startsWith('image/'));
+    const imageItem = Array.from(e.clipboardData.items).find(
+      (i) => i.kind === 'file' && i.type.startsWith('image/')
+    );
+    const imageFile = imageItem ? imageItem.getAsFile() : null;
 
-    if (hasImageOnly) {
+    if (imageFile && !html && !plain) {
       e.preventDefault();
-      notify(
-        'Bạn vừa dán một hình ảnh. MathFix EDU không giả lập OCR offline; vui lòng dán văn bản/công thức hoặc tải tệp DOCX/PDF có lớp văn bản.',
-        'warning'
-      );
+      void importImageFile(imageFile);
       return;
     }
 
@@ -532,12 +681,16 @@ export default function App() {
       const end = ta.selectionEnd ?? rawText.length;
       const merged = `${rawText.slice(0, start)}${extracted.text}${rawText.slice(end)}`;
       setExtraWarnings([]);
-      updateRawText(merged, extracted.sourceType);
-      runConversion(merged, extracted.sourceType, []);
-      notify(
-        `Đã dán nội dung có cấu trúc từ ${SOURCE_LABELS[extracted.sourceType]} và tự động chuẩn hóa.`,
-        'success'
-      );
+      if (imageFile) {
+        void importImageFile(imageFile, merged);
+      } else {
+        updateRawText(merged, extracted.sourceType);
+        runConversion(merged, extracted.sourceType, []);
+        notify(
+          `Đã dán nội dung có cấu trúc từ ${SOURCE_LABELS[extracted.sourceType]} và tự động chuẩn hóa.`,
+          'success'
+        );
+      }
       return;
     }
 
@@ -550,13 +703,54 @@ export default function App() {
       setTimeout(() => {
         const value = textareaRef.current?.value ?? plain;
         setExtraWarnings([]);
-        updateRawText(value, detected);
-        runConversion(value, detected, []);
+        if (imageFile) {
+          void importImageFile(imageFile, value);
+        } else {
+          updateRawText(value, detected);
+          runConversion(value, detected, []);
+        }
       }, 20);
     }
   };
 
-  // Explicit "Dán" button handler
+  // Explicit "Dán hình từ clipboard" button handler
+  const handlePasteImageFromClipboard = async () => {
+    try {
+      if (!navigator.clipboard || typeof navigator.clipboard.read !== 'function') {
+        textareaRef.current?.focus();
+        notify(
+          'Trình duyệt không hỗ trợ đọc ảnh trực tiếp qua nút bấm. Hãy nhấn Ctrl+V (Windows) hoặc Cmd+V (macOS) trực tiếp vào khung Văn bản gốc.',
+          'info'
+        );
+        return;
+      }
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imgType = item.types.find((t) =>
+          ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'].includes(t)
+        );
+        if (imgType) {
+          const blob = await item.getType(imgType);
+          const ext = imgType === 'image/jpeg' ? 'jpg' : imgType === 'image/webp' ? 'webp' : imgType === 'image/svg+xml' ? 'svg' : 'png';
+          const file = new File([blob], `hinh-dan-${Date.now()}.${ext}`, { type: imgType });
+          await importImageFile(file);
+          return;
+        }
+      }
+      notify(
+        'Clipboard hiện không có hình ảnh (PNG/JPG/WebP/SVG). Hãy chụp màn hình hoặc sao chép hình ảnh rồi dán lại.',
+        'info'
+      );
+    } catch {
+      textareaRef.current?.focus();
+      notify(
+        'Trình duyệt chưa cấp quyền đọc ảnh từ clipboard. Thầy cô hãy nhấn Ctrl+V (Windows) hoặc Cmd+V (macOS) ngay trong khung Văn bản gốc.',
+        'info'
+      );
+    }
+  };
+
+  // Explicit "Dán" button handler (handles both text/formulas and clipboard images)
   const handlePasteButton = async () => {
     const res = await readClipboardStructured();
     if (!res.ok) {
@@ -569,10 +763,7 @@ export default function App() {
     }
 
     if (res.hasImage && !res.html && !res.text) {
-      notify(
-        'Clipboard đang chứa hình ảnh. MathFix EDU không giả lập OCR offline — vui lòng sao chép công thức/văn bản hoặc nhập tệp DOCX/PDF.',
-        'warning'
-      );
+      await handlePasteImageFromClipboard();
       return;
     }
 
@@ -593,7 +784,7 @@ export default function App() {
     }
 
     if (!nextText.trim()) {
-      notify('Clipboard hiện không có văn bản hoặc công thức.', 'info');
+      notify('Clipboard hiện không có văn bản, công thức hoặc hình ảnh.', 'info');
       return;
     }
 
@@ -601,6 +792,23 @@ export default function App() {
     updateRawText(nextText, detected);
     runConversion(nextText, detected, []);
     notify('Đã dán từ clipboard và tự động chuẩn hóa công thức.', 'success');
+  };
+
+  // Image file input & drag-and-drop handlers
+  const handleImageFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    await importImageFile(file);
+  };
+
+  const handleTextareaDrop = (e: React.DragEvent<HTMLTextAreaElement>) => {
+    const file = Array.from(e.dataTransfer.files).find((f) =>
+      f.type.startsWith('image/') || f.name.toLowerCase().endsWith('.svg')
+    );
+    if (!file) return;
+    e.preventDefault();
+    void importImageFile(file);
   };
 
   // File upload handler: DOCX, PDF, TXT, HTML
@@ -727,6 +935,180 @@ export default function App() {
     );
     return found ?? null;
   }, [processedDoc, selectedParagraphId]);
+
+  // First figure referenced in current document (fallback for Ribbon edit/export buttons)
+  const firstDocumentFigureId = useMemo(() => {
+    if (!processedDoc) return null;
+    for (const b of processedDoc.blocks) {
+      if (b.type === 'paragraph') {
+        const seg = b.segments.find((s) => s.type === 'figure');
+        if (seg && seg.type === 'figure') return seg.figureId;
+      } else {
+        for (const r of b.rows) {
+          for (const c of r) {
+            for (const p of c.paragraphs) {
+              const seg = p.segments.find((s) => s.type === 'figure');
+              if (seg && seg.type === 'figure') return seg.figureId;
+            }
+          }
+        }
+      }
+    }
+    return null;
+  }, [processedDoc]);
+
+  const activeFigure = useMemo(() => {
+    const id = selectedFigureId || firstDocumentFigureId;
+    return id ? figuresMap.get(id) ?? null : null;
+  }, [selectedFigureId, firstDocumentFigureId, figuresMap]);
+
+  const editingFigure = useMemo(
+    () => (editingFigureId ? figuresMap.get(editingFigureId) ?? null : null),
+    [editingFigureId, figuresMap]
+  );
+
+  // Drawing Workspace actions (Dedicated full workspace — NO dimmed modal!)
+  const openDrawingMode = (mode: DrawingWorkspaceMode, figureToEdit?: FigureAsset | null) => {
+    setEditingFigureId(figureToEdit ? figureToEdit.id : null);
+    setDrawingMode(mode);
+    setViewMode('drawing');
+  };
+
+  const handleEditFigure = (figure: FigureAsset) => {
+    setSelectedFigureId(figure.id);
+    if (figure.kind === 'vector_2d') {
+      openDrawingMode('vector_2d', figure);
+    } else if (figure.kind === 'geometry_3d') {
+      openDrawingMode('geometry_3d', figure);
+    } else if (figure.kind === 'graph') {
+      openDrawingMode('graph', figure);
+    } else if (figure.kind === 'chemistry_2d') {
+      openDrawingMode('chemistry_2d', figure);
+    } else {
+      openDrawingMode('raster_edit', figure);
+    }
+  };
+
+  const handleCommitFigure = async (figure: FigureAsset, isUpdate: boolean) => {
+    await saveFigureAsset(figure);
+    setFiguresMap((prev) => {
+      const next = new Map(prev);
+      next.set(figure.id, figure);
+      return next;
+    });
+    setSelectedFigureId(figure.id);
+    setEditingFigureId(null);
+    setViewMode('workspace');
+    setMobileTab('result');
+
+    if (isUpdate) {
+      // Force re-render of document so updated caption/dimensions show immediately
+      if (rawText.trim()) runConversion(rawText, sourceType, extraWarnings);
+      notify(`Đã cập nhật hình "${figure.title}" trong tài liệu.`, 'success');
+    } else {
+      const token = `[[HINH:${figure.id}]]`;
+      const ta = textareaRef.current;
+      const pos = ta?.selectionStart ?? rawText.length;
+      const lineStart = rawText.lastIndexOf('\n', Math.max(0, pos - 1)) + 1;
+      const prefixOnLine = rawText.slice(lineStart, pos);
+      const isInsideMcqOption = /^\s*[A-D]\.\s*$/.test(prefixOnLine);
+      insertTextAtCursor(
+        isInsideMcqOption ? token : `\n${token}\n`,
+        `Đã chèn hình "${figure.title}" vào câu hỏi.`
+      );
+    }
+  };
+
+  const handleUpdateFigureInline = async (updated: FigureAsset) => {
+    await saveFigureAsset(updated);
+    setFiguresMap((prev) => {
+      const next = new Map(prev);
+      next.set(updated.id, updated);
+      return next;
+    });
+  };
+
+  const handleRemoveFigureFromDoc = (figureId: string) => {
+    const escaped = figureId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const nextText = rawText
+      .replace(new RegExp(`\\n?\\[\\[HINH:${escaped}\\]\\]\\n?`, 'g'), '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    if (selectedFigureId === figureId) setSelectedFigureId(null);
+    updateRawText(nextText, sourceType);
+    runConversion(nextText, sourceType, extraWarnings);
+    notify('Đã gỡ hình khỏi tài liệu.', 'info');
+  };
+
+  const handleExportFigureFile = async (figure: FigureAsset, format: 'svg' | 'png') => {
+    const safeName = (figure.title || figure.id).replace(/[^a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF_-]+/g, '-');
+    if (format === 'svg') {
+      if (!figure.svgMarkup || figure.kind === 'raster_upload') {
+        notify('Hình ảnh tải lên ở định dạng ảnh raster (PNG/JPG/WebP) — hãy dùng "Xuất hình PNG".', 'info');
+        return;
+      }
+      const cleanSvg = sanitizeSvgMarkup(figure.svgMarkup) || figure.svgMarkup;
+      const blob = new Blob([cleanSvg], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `MathFix-${safeName}.svg`;
+      a.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      notify(`Đã xuất hình vector SVG "${figure.title}".`, 'success');
+      return;
+    }
+    try {
+      const pngUrl =
+        figure.pngDataUrl ||
+        (figure.svgMarkup ? (await svgMarkupToPngDataUrl(figure.svgMarkup, 1120)) || '' : '');
+      if (!pngUrl) {
+        notify('Không có dữ liệu ảnh PNG cho hình này.', 'warning');
+        return;
+      }
+      const a = document.createElement('a');
+      a.href = pngUrl;
+      a.download = `MathFix-${safeName}.png`;
+      a.click();
+      notify(`Đã xuất hình ảnh PNG độ phân giải cao "${figure.title}".`, 'success');
+    } catch {
+      notify('Không thể xuất ảnh PNG cho hình này.', 'warning');
+    }
+  };
+
+  // Custom Figure Library persistence handlers
+  const handleSaveCustomFigureTemplate = async (tpl: FigureLibraryTemplate) => {
+    const saved = await saveCustomFigureTemplate(tpl);
+    setCustomFigureTemplates((prev) => {
+      const idx = prev.findIndex((x) => x.id === saved.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = saved;
+        return copy;
+      }
+      return [saved, ...prev];
+    });
+    notify(`Đã lưu mẫu hình "${saved.name}" vào thư viện hình cá nhân (offline).`, 'success');
+  };
+
+  const handleDeleteCustomFigureTemplate = async (id: string) => {
+    await deleteCustomFigureTemplate(id);
+    setCustomFigureTemplates((prev) => prev.filter((x) => x.id !== id));
+    notify('Đã xóa mẫu hình khỏi thư viện cá nhân.', 'info');
+  };
+
+  const handleToggleFavoriteFigureTemplate = async (id: string) => {
+    const next = figureFavoriteIds.includes(id)
+      ? figureFavoriteIds.filter((x) => x !== id)
+      : [id, ...figureFavoriteIds];
+    setFigureFavoriteIds(next);
+    await saveFigureFavoriteIds(next);
+  };
+
+  const handleRecordRecentFigureTemplate = async (id: string) => {
+    const next = await recordRecentFigureTemplate(id);
+    setFigureRecents(next);
+  };
 
   // Studio actions (Docked MathLive Editor — never dims/blocks workspace!)
   const openStudioCreate = (subj: FormulaSubject = 'math', seedLatex = '') => {
@@ -1094,12 +1476,28 @@ export default function App() {
       return;
     }
     try {
+      // Ensure every figure referenced in the document has a crisp PNG fallback for Word 2016/2019/365
+      const hydratedFigures = new Map<string, FigureAsset>(figuresMap);
+      for (const [id, fig] of figuresMap.entries()) {
+        if (!fig.pngDataUrl && fig.svgMarkup) {
+          try {
+            const pngDataUrl = await svgMarkupToPngDataUrl(fig.svgMarkup, 1120);
+            if (pngDataUrl) {
+              hydratedFigures.set(id, { ...fig, pngDataUrl });
+            }
+          } catch {
+            // Keep existing asset if canvas rasterization fails
+          }
+        }
+      }
+
       await exportDocxFile(processedDoc, 'MathFix-EDU-Tai-Lieu.docx', {
         style: examStyle,
         header: examHeader,
+        figures: hydratedFigures,
       });
       notify(
-        'Đã xuất tệp Word (.docx) chứa công thức Word Equation (OMML) chỉnh sửa được theo đúng định dạng A4.',
+        'Đã xuất tệp Word (.docx) gồm văn bản, công thức Word Equation (OMML) chỉnh sửa được và hình minh họa sắc nét theo chuẩn A4.',
         'success'
       );
     } catch (err) {
@@ -1176,6 +1574,13 @@ export default function App() {
         className="hidden"
       />
       <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg"
+        onChange={handleImageFileUpload}
+        className="hidden"
+      />
+      <input
         ref={libraryImportRef}
         type="file"
         accept=".json,application/json"
@@ -1221,6 +1626,18 @@ export default function App() {
             >
               <PenTool className="h-4 w-4" aria-hidden="true" />
               <span>Soạn thảo</span>
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                viewMode === 'drawing' ? setViewMode('workspace') : openDrawingMode('vector_2d')
+              }
+              className={`inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                viewMode === 'drawing' ? 'text-[#0B4F8A] font-semibold' : 'hover:text-slate-900'
+              }`}
+            >
+              <Shapes className="h-4 w-4" aria-hidden="true" />
+              <span>Vẽ hình</span>
             </button>
             <button
               type="button"
@@ -1303,7 +1720,7 @@ export default function App() {
         </div>
       )}
 
-      {/* DEDICATED FULL-PAGE GUIDE VIEW (Section XXI) */}
+      {/* DEDICATED FULL-PAGE GUIDE VIEW (Section XXI) OR DEDICATED DRAWING WORKSPACE */}
       {viewMode === 'guide' ? (
         <GuideView
           onBack={() => setViewMode('workspace')}
@@ -1314,9 +1731,36 @@ export default function App() {
             setActivePanel('library');
           }}
         />
+      ) : viewMode === 'drawing' ? (
+        <Suspense
+          fallback={
+            <div className="flex flex-1 items-center justify-center p-10 text-base text-slate-600">
+              Đang tải Không gian Vẽ hình khoa học MathFix EDU...
+            </div>
+          }
+        >
+          <DrawingWorkspace
+            key={`${drawingMode}-${editingFigure?.id || 'new'}`}
+            initialMode={drawingMode}
+            activeSubjectMode={subjectMode}
+            editingFigure={editingFigure}
+            customTemplates={customFigureTemplates}
+            favoriteIds={figureFavoriteIds}
+            recentEntries={figureRecents}
+            onCommitFigure={handleCommitFigure}
+            onSaveCustomTemplate={handleSaveCustomFigureTemplate}
+            onDeleteCustomTemplate={handleDeleteCustomFigureTemplate}
+            onToggleFavoriteTemplate={handleToggleFavoriteFigureTemplate}
+            onRecordRecentTemplate={handleRecordRecentFigureTemplate}
+            onClose={() => {
+              setEditingFigureId(null);
+              setViewMode('workspace');
+            }}
+          />
+        </Suspense>
       ) : (
         <>
-          {/* MICROSOFT WORD–STYLE 8-GROUP RIBBON TOOLBAR (Section IV) */}
+          {/* MICROSOFT WORD–STYLE RIBBON TOOLBAR (9 GROUPS INCL. DRAWING & FIGURES) */}
           <RibbonToolbar
             activeTab={ribbonTab}
             onChangeTab={setRibbonTab}
@@ -1329,6 +1773,7 @@ export default function App() {
             hasContent={Boolean(rawText.trim())}
             hasProcessedDoc={Boolean(processedDoc)}
             hasSelectedFormula={Boolean(selectedFormula || formulaMap.size > 0)}
+            hasSelectedFigure={Boolean(activeFigure)}
             isProcessing={processingState === 'processing'}
             isFullscreen={isFullscreen}
             // Group 1
@@ -1360,6 +1805,20 @@ export default function App() {
               else openStudioCreate('math');
             }}
             onInsertFormulaIntoText={() => openStudioCreate(subjectMode === 'auto' ? 'math' : subjectMode)}
+            // Group 3b: Drawing & Figures
+            onOpenDrawingMode={(mode) => openDrawingMode(mode, null)}
+            onEditSelectedFigure={() => {
+              if (activeFigure) handleEditFigure(activeFigure);
+              else notify('Vui lòng nhấp chọn một hình trong tài liệu để chỉnh sửa.', 'info');
+            }}
+            onUploadImageFile={() => imageInputRef.current?.click()}
+            onPasteImageFromClipboard={handlePasteImageFromClipboard}
+            onExportSelectedFigureSvg={() => {
+              if (activeFigure) void handleExportFigureFile(activeFigure, 'svg');
+            }}
+            onExportSelectedFigurePng={() => {
+              if (activeFigure) void handleExportFigureFile(activeFigure, 'png');
+            }}
             // Group 4
             onOpenLibrary={(tab) => {
               setLibraryTab(tab);
@@ -1547,6 +2006,7 @@ export default function App() {
             <PrintPreviewPanel
               open={activePanel === 'preview'}
               document={processedDoc}
+              figures={figuresMap}
               examStyle={examStyle}
               examHeader={examHeader}
               onExportWord={handleExportWord}
@@ -1643,8 +2103,12 @@ export default function App() {
                   value={rawText}
                   onChange={(e) => updateRawText(e.target.value)}
                   onPaste={handleTextareaPaste}
+                  onDragOver={(e) => {
+                    if (Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault();
+                  }}
+                  onDrop={handleTextareaDrop}
                   spellCheck={false}
-                  placeholder={`Dán công thức, đoạn văn hoặc toàn bộ đề kiểm tra Toán – Vật lí – Hóa học vào đây (Ctrl+V / Cmd+V)...\n\nVí dụ:\n- Toán học: \\frac{x^2+1}{2}, \\int_0^1 x^2 dx, \\begin{cases} x+y=3 \\\\ x-y=1 \\end{cases}\n- Vật lí: \\vec{F} = m\\vec{a}, W_d = \\frac12mv^2, F_ms = \\mu N, v = 10 m/s\n- Hóa học: H2SO4, Fe3+, SO4^2-, 2H2 + O2 ->[t°] 2H2O, CaCO3 ->[t°] CaO + CO2 ↑\n\nHoặc nhấn "Tạo công thức mới" trên thanh công cụ để soạn trực quan như MathType.`}
+                  placeholder={`Dán công thức, đoạn văn, hình ảnh hoặc toàn bộ đề kiểm tra Toán – Vật lí – Hóa học vào đây (Ctrl+V / Cmd+V hoặc kéo thả ảnh)...\n\nVí dụ:\n- Toán học: \\frac{x^2+1}{2}, \\int_0^1 x^2 dx, \\begin{cases} x+y=3 \\\\ x-y=1 \\end{cases}\n- Vật lí: \\vec{F} = m\\vec{a}, W_d = \\frac12mv^2, F_ms = \\mu N, v = 10 m/s\n- Hóa học: H2SO4, Fe3+, SO4^2-, 2H2 + O2 ->[t°] 2H2O, CaCO3 ->[t°] CaO + CO2 ↑\n\nMở thẻ "Vẽ hình & Chèn hình" để vẽ hình 2D, 3D, đồ thị, bảng biến thiên, mạch điện hoặc công thức cấu tạo Hóa học.`}
                   className="mathfix-scroll flex-1 w-full min-h-[460px] lg:max-h-[76vh] resize-none bg-white p-4 sm:p-5 text-[15px] leading-relaxed text-slate-900 placeholder:text-slate-400 focus:outline-none"
                   aria-label="Khung nhập văn bản gốc và công thức Toán – Vật lí – Hóa học"
                 />
@@ -1834,8 +2298,10 @@ export default function App() {
                 <div className="mathfix-scroll flex-1 overflow-y-auto p-4 sm:p-6 lg:max-h-[76vh]">
                   <NormalizedDocumentView
                     document={processedDoc}
+                    figures={figuresMap}
                     compareMode={compareMode}
                     selectedFormulaId={selectedFormulaId}
+                    selectedFigureId={selectedFigureId}
                     selectedParagraphId={selectedParagraphId}
                     contentRef={normalizedContentRef}
                     examStyle={examStyle}
@@ -1847,6 +2313,11 @@ export default function App() {
                         openStudioEdit(formula);
                       }
                     }}
+                    onSelectFigure={(figId) => setSelectedFigureId(figId)}
+                    onEditFigure={handleEditFigure}
+                    onUpdateFigure={handleUpdateFigureInline}
+                    onRemoveFigure={handleRemoveFigureFromDoc}
+                    onExportFigure={(fig, fmt) => void handleExportFigureFile(fig, fmt)}
                     onSelectParagraph={(para) => setSelectedParagraphId(para.id)}
                     onCopyParagraph={(para) => handleCopySelectedParagraph(para)}
                     onAcceptFormula={handleAcceptFormula}

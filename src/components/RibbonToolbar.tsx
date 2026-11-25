@@ -5,6 +5,7 @@ import {
   BookMarked,
   BookOpen,
   BookmarkCheck,
+  Box,
   CheckSquare,
   ChevronDown,
   ChevronUp,
@@ -22,11 +23,13 @@ import {
   FileSpreadsheet,
   FileText,
   FlaskConical,
+  FolderOpen,
   Hash,
   Heading,
   HelpCircle,
   Image as ImageIcon,
   Layers,
+  LineChart,
   ListChecks,
   ListOrdered,
   Maximize2,
@@ -45,6 +48,7 @@ import {
   Undo2,
   Upload,
   Wand2,
+  Zap,
 } from 'lucide-react';
 import { FormulaSubject, SubjectMode } from '../engine/types';
 import { ExportFormatId } from '../engine/formatConverter';
@@ -54,6 +58,7 @@ export type RibbonTabId =
   | 'clipboard'
   | 'convert'
   | 'compose'
+  | 'drawing'
   | 'library'
   | 'normalize'
   | 'exam_tools'
@@ -72,6 +77,7 @@ interface RibbonToolbarProps {
   hasContent: boolean;
   hasProcessedDoc: boolean;
   hasSelectedFormula: boolean;
+  hasSelectedFigure: boolean;
   isProcessing: boolean;
   isFullscreen: boolean;
   // Group 1: Clipboard & Paste
@@ -91,6 +97,13 @@ interface RibbonToolbarProps {
   onCreateNewFormula: (subject?: FormulaSubject) => void;
   onEditSelectedFormula: () => void;
   onInsertFormulaIntoText: () => void;
+  // Group 3b: Drawing & Figures (Math – Physics – Chemistry)
+  onOpenDrawingMode: (mode: 'vector_2d' | 'geometry_3d' | 'graph' | 'chemistry_2d' | 'library') => void;
+  onEditSelectedFigure: () => void;
+  onUploadImageFile: () => void;
+  onPasteImageFromClipboard: () => void;
+  onExportSelectedFigureSvg: () => void;
+  onExportSelectedFigurePng: () => void;
   // Group 4: Formula Library
   onOpenLibrary: (tab: 'all' | 'personal' | 'favorites' | 'recent') => void;
   onImportLibrary: () => void;
@@ -121,6 +134,7 @@ const RIBBON_TABS: Array<{ id: RibbonTabId; label: string }> = [
   { id: 'clipboard', label: 'Sao chép – Dán' },
   { id: 'convert', label: 'Chuyển đổi chuẩn hóa' },
   { id: 'compose', label: 'Soạn công thức' },
+  { id: 'drawing', label: 'Vẽ hình & Chèn hình' },
   { id: 'library', label: 'Thao tác thư viện' },
   { id: 'normalize', label: 'Chuẩn hóa đề thi' },
   { id: 'exam_tools', label: 'Công cụ đề thi' },
@@ -374,6 +388,84 @@ export const RibbonToolbar: React.FC<RibbonToolbarProps> = (props) => {
                   icon={<FlaskConical className="h-4 w-4" />}
                   label="Soạn công thức Hóa học"
                   onClick={() => props.onCreateNewFormula('chemistry')}
+                />
+              </>
+            )}
+
+            {props.activeTab === 'drawing' && (
+              <>
+                <RibbonBtn
+                  icon={<PenTool className="h-4 w-4" />}
+                  label="Vẽ hình mới"
+                  onClick={() => props.onOpenDrawingMode('vector_2d')}
+                  title="Mở bảng vẽ vector 2D cho Toán học, Vật lí và Hóa học"
+                  primary
+                />
+                <RibbonBtn
+                  icon={<FolderOpen className="h-4 w-4" />}
+                  label="Thư viện hình"
+                  onClick={() => props.onOpenDrawingMode('library')}
+                  title="Mở thư viện hình mẫu chuẩn khoa học (Toán – Vật lí – Hóa học)"
+                />
+                <RibbonBtn
+                  icon={<Edit3 className="h-4 w-4" />}
+                  label="Chỉnh sửa hình"
+                  onClick={props.onEditSelectedFigure}
+                  disabled={!props.hasSelectedFigure}
+                  title="Chỉnh sửa lại hình vẽ đang chọn trong tài liệu"
+                />
+                <div className="h-6 w-px bg-slate-200 mx-0.5 hidden sm:block" aria-hidden="true" />
+                <RibbonBtn
+                  icon={<Upload className="h-4 w-4" />}
+                  label="Chèn hình từ máy"
+                  onClick={props.onUploadImageFile}
+                  title="Chèn ảnh PNG, JPG, WebP hoặc SVG an toàn từ máy tính vào vị trí con trỏ"
+                />
+                <RibbonBtn
+                  icon={<ClipboardPaste className="h-4 w-4" />}
+                  label="Dán hình từ clipboard"
+                  onClick={props.onPasteImageFromClipboard}
+                  title="Dán hình ảnh trực tiếp từ clipboard vào câu hỏi"
+                />
+                <div className="h-6 w-px bg-slate-200 mx-0.5 hidden sm:block" aria-hidden="true" />
+                <RibbonBtn
+                  icon={<LineChart className="h-4 w-4" />}
+                  label="Vẽ đồ thị hàm số"
+                  onClick={() => props.onOpenDrawingMode('graph')}
+                  title="Vẽ đồ thị hàm số, bảng biến thiên, bảng xét dấu và bảng giá trị"
+                />
+                <RibbonBtn
+                  icon={<Box className="h-4 w-4" />}
+                  label="Hình học không gian 3D"
+                  onClick={() => props.onOpenDrawingMode('geometry_3d')}
+                  title="Vẽ 14 khối hình học không gian 3D xoay góc nhìn tự do, tự động nét đứt khuất"
+                />
+                <RibbonBtn
+                  icon={<FlaskConical className="h-4 w-4" />}
+                  label="Công thức cấu tạo Hóa học"
+                  onClick={() => props.onOpenDrawingMode('chemistry_2d')}
+                  title="Vẽ công thức cấu tạo Hóa học 2D (vòng benzen, mạch thẳng/nhánh, công thức Lewis)"
+                />
+                <RibbonBtn
+                  icon={<Zap className="h-4 w-4" />}
+                  label="Mạch điện & Thí nghiệm"
+                  onClick={() => props.onOpenDrawingMode('vector_2d')}
+                  title="Vẽ sơ đồ mạch điện IEC, quang hình, cơ học Vật lí và dụng cụ thí nghiệm Hóa học"
+                />
+                <div className="h-6 w-px bg-slate-200 mx-0.5 hidden sm:block" aria-hidden="true" />
+                <RibbonBtn
+                  icon={<FileImage className="h-4 w-4" />}
+                  label="Xuất hình SVG"
+                  onClick={props.onExportSelectedFigureSvg}
+                  disabled={!props.hasSelectedFigure}
+                  title="Tải xuống hình vector đang chọn ở định dạng SVG sắc nét"
+                />
+                <RibbonBtn
+                  icon={<ImageIcon className="h-4 w-4" />}
+                  label="Xuất hình PNG"
+                  onClick={props.onExportSelectedFigurePng}
+                  disabled={!props.hasSelectedFigure}
+                  title="Tải xuống hình đang chọn ở định dạng ảnh PNG độ phân giải cao"
                 />
               </>
             )}

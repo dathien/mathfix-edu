@@ -547,6 +547,9 @@ function segmentsToWordHtml(segments: InlineSegment[]): string {
       if (seg.type === 'text') {
         return escapeXml(seg.text);
       }
+      if (seg.type === 'figure') {
+        return `<span>${escapeXml(`[Hình minh họa: ${seg.figureId}]`)}</span>`;
+      }
       return buildFormulaWordHtmlSnippet(seg, false);
     })
     .join('');
@@ -556,6 +559,7 @@ function segmentsToPlainText(segments: InlineSegment[]): string {
   return segments
     .map((seg) => {
       if (seg.type === 'text') return seg.text;
+      if (seg.type === 'figure') return seg.raw;
       return seg.displayMode ? `$$${seg.activeLatex}$$` : `$${seg.activeLatex}$`;
     })
     .join('');
@@ -576,7 +580,7 @@ function paragraphToWordBodyHtml(para: ParagraphBlock): string {
   let inlineBuf: InlineSegment[] = [];
 
   const flushInline = () => {
-    const hasContent = inlineBuf.some((s) => s.type === 'formula' || s.text.trim().length > 0);
+    const hasContent = inlineBuf.some((s) => s.type !== 'text' || s.text.trim().length > 0);
     if (hasContent) {
       parts.push(
         `<p class="MsoNormal" style="font-family:'Times New Roman',serif;font-size:13pt;line-height:1.5;">${segmentsToWordHtml(inlineBuf)}</p>`
@@ -600,7 +604,7 @@ function paragraphToWordBodyHtml(para: ParagraphBlock): string {
 export function paragraphToExportPair(para: ParagraphBlock): ExportPair {
   // If paragraph is a single standalone formula (no surrounding prose), export with MathML plain fallback too
   const nonEmptySegments = para.segments.filter(
-    (s) => s.type === 'formula' || s.text.trim().length > 0
+    (s) => s.type !== 'text' || s.text.trim().length > 0
   );
   if (nonEmptySegments.length === 1 && nonEmptySegments[0].type === 'formula') {
     return buildDisplayedFormulaExportPair(nonEmptySegments[0]);
@@ -617,7 +621,7 @@ export function documentToExportPair(doc: ProcessedDocument): ExportPair {
   // convert seamlessly into a Word Equation!
   if (doc.blocks.length === 1 && doc.blocks[0].type === 'paragraph') {
     const nonEmpty = doc.blocks[0].segments.filter(
-      (s) => s.type === 'formula' || s.text.trim().length > 0
+      (s) => s.type !== 'text' || s.text.trim().length > 0
     );
     if (nonEmpty.length === 1 && nonEmpty[0].type === 'formula') {
       return buildDisplayedFormulaExportPair(nonEmpty[0]);

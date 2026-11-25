@@ -517,6 +517,27 @@ export function parseInlineLine(line: string, subjectMode: SubjectMode = 'auto')
   };
 
   while (i < line.length) {
+    // 0. Embedded figure token [[HINH:fig_id]]
+    if (line[i] === '[' && line[i + 1] === '[' && line.startsWith('[[HINH:', i)) {
+      const closeIdx = line.indexOf(']]', i + 7);
+      if (closeIdx !== -1) {
+        const figureId = line.slice(i + 7, closeIdx).trim();
+        if (/^[a-zA-Z0-9_-]+$/.test(figureId)) {
+          flushText(i);
+          const raw = line.slice(i, closeIdx + 2);
+          segments.push({
+            id: nextId('figseg'),
+            type: 'figure',
+            figureId,
+            raw,
+          });
+          i = closeIdx + 2;
+          textStart = i;
+          continue;
+        }
+      }
+    }
+
     // Escaped dollar \$ inside text
     if (line[i] === '\\' && line[i + 1] === '$') {
       i += 2;

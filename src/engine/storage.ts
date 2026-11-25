@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = 'mathfix_edu_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_NAME = 'drafts';
 const DRAFT_KEY = 'current_draft';
 
@@ -31,6 +31,15 @@ function openDatabase(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains('library_meta')) {
         db.createObjectStore('library_meta', { keyPath: 'key' });
+      }
+      if (!db.objectStoreNames.contains('figures')) {
+        db.createObjectStore('figures', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('custom_figure_templates')) {
+        db.createObjectStore('custom_figure_templates', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('figure_meta')) {
+        db.createObjectStore('figure_meta', { keyPath: 'key' });
       }
     };
     request.onsuccess = () => resolve(request.result);

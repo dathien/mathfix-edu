@@ -1,11 +1,14 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { FileDown, Printer, X, ZoomIn, ZoomOut } from 'lucide-react';
-import { ProcessedDocument } from '../engine/types';
+import { FigureSegment, InlineSegment, ProcessedDocument } from '../engine/types';
+import { FigureAsset } from '../engine/figureTypes';
+import { sanitizeSvgMarkup } from '../engine/svgSanitizer';
 import { ExamHeaderConfig, ExamStyleSettings, hasAnyHeaderContent } from '../engine/examTools';
 
 interface PrintPreviewPanelProps {
   open: boolean;
   document: ProcessedDocument | null;
+  figures?: Map<string, FigureAsset>;
   examStyle: ExamStyleSettings;
   examHeader: ExamHeaderConfig;
   onExportWord: () => void;
@@ -17,6 +20,7 @@ interface PrintPreviewPanelProps {
 export const PrintPreviewPanel: React.FC<PrintPreviewPanelProps> = ({
   open,
   document,
+  figures,
   examStyle,
   examHeader,
   onExportWord,
@@ -25,6 +29,69 @@ export const PrintPreviewPanel: React.FC<PrintPreviewPanelProps> = ({
   onClose,
 }) => {
   const [scale, setScale] = useState<number>(90);
+
+  const figureNumberMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!document) return map;
+    let counter = 0;
+    const visit = (segs: InlineSegment[]) => {
+      for (const s of segs) {
+        if (s.type === 'figure' && !map.has(s.figureId)) {
+          counter += 1;
+          map.set(s.figureId, counter);
+        }
+      }
+    };
+    for (const b of document.blocks) {
+      if (b.type === 'paragraph') visit(b.segments);
+      else {
+        for (const r of b.rows) {
+          for (const c of r) {
+            for (const p of c.paragraphs) visit(p.segments);
+          }
+        }
+      }
+    }
+    return map;
+  }, [document]);
+
+  const renderPrintFigure = (seg: FigureSegment, compact = false) => {
+    const fig = figures?.get(seg.figureId);
+    if (!fig) return null;
+    const figNum = figureNumberMap.get(fig.id) ?? 1;
+    const alignStyle =
+      fig.align === 'left'
+        ? 'items-start text-left'
+        : fig.align === 'right'
+        ? 'items-end text-right'
+        : 'items-center text-center';
+    const safeSvg =
+      fig.kind !== 'raster_upload' && fig.svgMarkup ? sanitizeSvgMarkup(fig.svgMarkup) : '';
+    const maxW = compact ? Math.min(fig.widthPx, 220) : Math.min(fig.widthPx, 540);
+    const caption = fig.showNumber
+      ? fig.caption?.trim()
+        ? `Hình ${figNum}. ${fig.caption.trim()}`
+        : `Hình ${figNum}.`
+      : fig.caption?.trim() || '';
+
+    return (
+      <figure key={seg.id} className={`break-inside-avoid my-2 flex flex-col ${alignStyle}`}>
+        <div style={{ width: `${maxW}px`, maxWidth: '100%' }}>
+          {safeSvg ? (
+            <div
+              className="w-full [&>svg]:w-full [&>svg]:h-auto [&>svg]:block"
+              dangerouslySetInnerHTML={{ __html: safeSvg }}
+            />
+          ) : fig.pngDataUrl ? (
+            <img src={fig.pngDataUrl} alt={caption || fig.title} className="w-full h-auto block" />
+          ) : null}
+          {caption && (
+            <figcaption className="mt-1 text-[0.9em] italic text-slate-800">{caption}</figcaption>
+          )}
+        </div>
+      </figure>
+    );
+  };
 
   if (!open) return null;
 
@@ -176,6 +243,8 @@ export const PrintPreviewPanel: React.FC<PrintPreviewPanelProps> = ({
                                     {p.segments.map((seg) =>
                                       seg.type === 'text' ? (
                                         <span key={seg.id}>{seg.text}</span>
+                                      ) : seg.type === 'figure' ? (
+                                        renderPrintFigure(seg, true)
                                       ) : seg.validated && seg.svg ? (
                                         <span
                                           key={seg.id}
@@ -223,6 +292,10 @@ export const PrintPreviewPanel: React.FC<PrintPreviewPanelProps> = ({
                           );
                         }
                         return <React.Fragment key={seg.id}>{seg.text}</React.Fragment>;
+                      }
+
+                      if (seg.type === 'figure') {
+                        return renderPrintFigure(seg, false);
                       }
 
                       if (seg.ommlCompatible === false) {

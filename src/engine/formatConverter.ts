@@ -390,6 +390,7 @@ export function convertDocumentToFormat(
     segs
       .map((seg) => {
         if (seg.type === 'text') return seg.text;
+        if (seg.type === 'figure') return seg.raw;
         const r = convertFormulaToFormat(seg, format);
         if (!r.supported) {
           allSupported = false;

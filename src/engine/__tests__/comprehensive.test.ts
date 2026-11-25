@@ -387,7 +387,7 @@ describe('5. Bộ kiểm thử 30 câu văn tiếng Việt chứa công thức x
     const fullText = doc.blocks
       .map((b) =>
         b.type === 'paragraph'
-          ? b.segments.map((s) => (s.type === 'text' ? s.text : s.activeLatex)).join('')
+          ? b.segments.map((s) => (s.type === 'text' ? s.text : s.type === 'figure' ? s.raw : s.activeLatex)).join('')
           : ''
       )
       .join('\n');
