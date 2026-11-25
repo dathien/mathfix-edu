@@ -1,10 +1,26 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Download, X } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 
-export const PWAInstallControl: React.FC = () => {
+interface PWAInstallControlProps {
+  externalTriggerCount?: number;
+}
+
+export const PWAInstallControl: React.FC<PWAInstallControlProps> = ({
+  externalTriggerCount = 0,
+}) => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showManualGuide, setShowManualGuide] = useState(false);
+
+  useEffect(() => {
+    if (externalTriggerCount <= 0 || isInstalled) return;
+    if (isInstallable) {
+      install();
+    } else {
+      setShowManualGuide(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalTriggerCount]);
 
   if (isInstalled) {
     return null;

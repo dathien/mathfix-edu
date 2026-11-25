@@ -15,9 +15,9 @@ export default defineConfig(() => {
         includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png', 'pdf.worker.min.mjs'],
         manifest: {
           id: '/',
-          name: 'MathFix EDU – Công cụ sửa lỗi và chuẩn hóa công thức Toán – Vật lí – Hóa học',
-          short_name: 'MathFix EDU',
-          description: 'Sao chép – Chuyển đổi – Chỉnh sửa – Sử dụng ngay.',
+          name: 'MathFix EDU',
+          short_name: 'MathFix',
+          description: 'Bộ công cụ soạn thảo, sửa lỗi và chuẩn hóa công thức Toán – Vật lí – Hóa học. Sao chép – Soạn thảo – Chuyển đổi – Sử dụng ngay.',
           theme_color: '#0B4F8A',
           background_color: '#F8FAFC',
           display: 'standalone',

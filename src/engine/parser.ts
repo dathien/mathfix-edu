@@ -51,13 +51,41 @@ export function extractStructuredInputFromHtml(html: string): {
 } {
   const sourceType = detectSourceType('', html);
   if (typeof DOMParser === 'undefined') {
-    // Fallback in non-DOM environments
-    const stripped = html
-      .replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[\s\S]*?<\/style>/gi, '')
+    // Structured fallback in non-DOM environments (Node/Vitest): handle KaTeX annotations, MathML, and tables
+    let working = html
+      .replace(/<script(?![^>]*math)[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '');
+
+    // Extract KaTeX TeX annotations
+    working = working.replace(
+      /<span[^>]*class="[^"]*katex[^"]*"[^>]*>[\s\S]*?<annotation[^>]*encoding="[^"]*tex[^"]*"[^>]*>([\s\S]*?)<\/annotation>[\s\S]*?<\/span>/gi,
+      (_m, tex: string) => `$${tex.trim()}$`
+    );
+
+    // Convert <math>...</math> to LaTeX via mathmlToLatex
+    working = working.replace(/<math\b[\s\S]*?<\/math>/gi, (mml: string) => {
+      const tex = mathmlToLatex(mml);
+      if (!tex) return '';
+      const isDisplay = /display\s*=\s*["']block["']/i.test(mml);
+      return isDisplay ? `\n$$${tex}$$\n` : `$${tex}$`;
+    });
+
+    // Convert <table>...</table> to markdown pipe rows
+    working = working.replace(/<table\b[\s\S]*?<\/table>/gi, (tbl: string) => {
+      const rowMatches = Array.from(tbl.matchAll(/<tr\b[\s\S]*?<\/tr>/gi));
+      const rows = rowMatches.map((rm) => {
+        const cellMatches = Array.from(rm[0].matchAll(/<t[hd]\b[^>]*>([\s\S]*?)<\/t[hd]>/gi));
+        const cells = cellMatches.map((cm) => cm[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
+        return `| ${cells.join(' | ')} |`;
+      });
+      return `\n${rows.join('\n')}\n`;
+    });
+
+    const stripped = working
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n')
-      .replace(/<[^>]+>/g, '');
+      .replace(/<[^>]+>/g, '')
+      .replace(/\n{3,}/g, '\n\n');
     return { text: stripped.trim(), sourceType, hasTables: /<table/i.test(html) };
   }
 
@@ -273,10 +301,11 @@ const BARE_MATH_TOKEN_PATTERNS: BarePatternDef[] = [
     modes: ['auto', 'physics'],
   },
   // UnicodeMath expressions: radicals (√, ∛), integrals/sums (∫, ∑), equations with Unicode superscripts/subscripts/operators
+  // Also handles Mathematical Italic Unicode variables (e.g. 𝑥² + 2𝑥 − 3 = 0) copied from ChatGPT/PDF.
   // Carefully requires NO Vietnamese diacritic letters inside the matched span!
   {
     regex:
-      /(?:[a-zA-Z0-9()]+(?:\s*[+\-−=≤≥≠<>]\s*)?)?(?:[√∛∜]\s*(?:\([^()]+\)|[a-zA-Z0-9]+)|[∫∑∏][₀-₉⁰-⁹a-zA-Z0-9+\-]*\s*[a-zA-Z0-9()^_+\-−/ ]*|[a-zA-Z][²³⁴⁵⁶⁷⁸⁹⁰¹ⁿ⁻¹⁺]+(?:[\s+\-−=≤≥≠<>a-zA-Z0-9²³⁴⁵⁶⁷⁸⁹⁰¹₀-₉()./]+)?|[a-zA-Z][₀-₉ₙᵢⱼ]+(?:[\s+\-−=≤≥≠<>a-zA-Z0-9²³⁴⁵⁶⁷⁸⁹⁰¹₀-₉()./]+)?|[∠△Δ][A-Z]{2,3}(?:\s*[=∼≅⊥∥]\s*[0-9°∠△ΔA-Z]+)?|[A-Z]{2}\s*[⊥∥]\s*[A-Z]{2})/g,
+      /(?:[a-zA-Z\u{1D434}-\u{1D467}0-9()]+(?:\s*[+\-−=≤≥≠<>]\s*)?)?(?:[√∛∜]\s*(?:\([^()]+\)|[a-zA-Z\u{1D434}-\u{1D467}0-9]+)|[∫∑∏][₀-₉⁰-⁹a-zA-Z\u{1D434}-\u{1D467}0-9+\-]*\s*[a-zA-Z\u{1D434}-\u{1D467}0-9()^_+\-−/ ]*|[a-zA-Z\u{1D434}-\u{1D467}][²³⁴⁵⁶⁷⁸⁹⁰¹ⁿ⁻¹⁺]+(?:[\s+\-−=≤≥≠<>a-zA-Z\u{1D434}-\u{1D467}0-9²³⁴⁵⁶⁷⁸⁹⁰¹₀-₉()./]+)?|[a-zA-Z\u{1D434}-\u{1D467}][₀-₉ₙᵢⱼ]+(?:[\s+\-−=≤≥≠<>a-zA-Z\u{1D434}-\u{1D467}0-9²³⁴⁵⁶⁷⁸⁹⁰¹₀-₉()./]+)?|[∠△Δ][A-Z]{2,3}(?:\s*[=∼≅⊥∥]\s*[0-9°∠△ΔA-Z]+)?|[A-Z]{2}\s*[⊥∥]\s*[A-Z]{2})/gu,
     format: 'unicodemath',
   },
   // Plain ASCII algebraic expressions with explicit ^ or _ (e.g. x^2 + 2x - 3 = 0, a_{n+1} = 2a_n, x^(n+1))

@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = 'mathfix_edu_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'drafts';
 const DRAFT_KEY = 'current_draft';
 
@@ -25,6 +25,12 @@ function openDatabase(): Promise<IDBDatabase> {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('custom_formulas')) {
+        db.createObjectStore('custom_formulas', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('library_meta')) {
+        db.createObjectStore('library_meta', { keyPath: 'key' });
       }
     };
     request.onsuccess = () => resolve(request.result);

@@ -1,6 +1,7 @@
 import { DocumentBlock, FormulaSegment, InlineSegment, ParagraphBlock, ProcessedDocument } from './types';
 import { escapeXml, mathmlToOmml } from './mathmlConverter';
 import { renderLatexToSvg, sanitizePresentationMathML } from './mathjaxRenderer';
+import { mathmlToUnicodeMath } from './formatConverter';
 
 export interface ClipboardCopyResult {
   ok: boolean;
@@ -149,6 +150,10 @@ export async function svgToPngBlob(svgMarkup: string, scale = 3): Promise<Blob> 
     };
     img.src = url;
   });
+}
+
+export async function copyPlainText(text: string): Promise<boolean> {
+  return copyPlainTextFallback(text);
 }
 
 async function copyPlainTextFallback(text: string): Promise<boolean> {
@@ -311,7 +316,7 @@ export function buildDisplayedFormulaExportPair(formula: FormulaSegment): Export
 
 export async function copyFormulaAs(
   formula: FormulaSegment,
-  format: 'display' | 'latex' | 'mathml' | 'svg' | 'png'
+  format: 'display' | 'latex' | 'mathml' | 'unicodemath' | 'svg' | 'png'
 ): Promise<ClipboardCopyResult> {
   try {
     if (format === 'display') {
@@ -365,6 +370,37 @@ export async function copyFormulaAs(
         message: ok
           ? 'Đã sao chép mã MathML chuẩn (text/plain). Dán vào Word Desktop bằng Ctrl+V (hoặc Keep Text Only) để Word tự chuyển thành Equation; nếu không tương thích, hãy dùng "Xuất Word (.docx)".'
           : 'Không thể sao chép MathML vào clipboard',
+      };
+    }
+
+    if (format === 'unicodemath') {
+      if (formula.ommlCompatible === false) {
+        return {
+          ok: false,
+          method: 'failed',
+          message:
+            'Công thức cấu tạo 2D phức tạp không hỗ trợ chuyển đổi tuyến tính sang UnicodeMath.',
+        };
+      }
+      const cleanMathml = getCleanFormulaMathML(formula);
+      if (!cleanMathml) {
+        return { ok: false, method: 'failed', message: 'Công thức chưa hợp lệ để chuyển sang UnicodeMath' };
+      }
+      const um = mathmlToUnicodeMath(cleanMathml);
+      if (!um.supported) {
+        return {
+          ok: false,
+          method: 'failed',
+          message: um.warning || 'Cấu trúc công thức này chưa được hỗ trợ đầy đủ trong UnicodeMath',
+        };
+      }
+      const ok = await copyPlainTextFallback(um.output);
+      return {
+        ok,
+        method: ok ? 'plainOnly' : 'failed',
+        message: ok
+          ? 'Đã sao chép công thức dạng UnicodeMath. Trong Word, mở Equation (Alt+=) rồi dán và nhấn Space để định dạng.'
+          : 'Không thể sao chép UnicodeMath vào clipboard',
       };
     }
 

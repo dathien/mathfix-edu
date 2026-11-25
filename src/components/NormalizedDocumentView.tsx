@@ -18,6 +18,7 @@ import {
   TableBlock,
 } from '../engine/types';
 import { buildSelectionExportPair } from '../engine/clipboardExport';
+import { ExamHeaderConfig, ExamStyleSettings, hasAnyHeaderContent } from '../engine/examTools';
 
 interface NormalizedDocumentViewProps {
   document: ProcessedDocument | null;
@@ -25,6 +26,9 @@ interface NormalizedDocumentViewProps {
   selectedFormulaId: string | null;
   selectedParagraphId: string | null;
   contentRef?: React.RefObject<HTMLDivElement | null>;
+  examStyle?: ExamStyleSettings;
+  examHeader?: ExamHeaderConfig;
+  zoomPercent?: number;
   onSelectFormula: (formula: FormulaSegment, openEditor: boolean) => void;
   onSelectParagraph: (para: ParagraphBlock) => void;
   onCopyParagraph: (para: ParagraphBlock) => void;
@@ -108,6 +112,9 @@ export const NormalizedDocumentView: React.FC<NormalizedDocumentViewProps> = ({
   selectedFormulaId,
   selectedParagraphId,
   contentRef,
+  examStyle,
+  examHeader,
+  zoomPercent = 100,
   onSelectFormula,
   onSelectParagraph,
   onCopyParagraph,
@@ -258,7 +265,7 @@ export const NormalizedDocumentView: React.FC<NormalizedDocumentViewProps> = ({
         }`}
       >
         <div
-          className={`text-[16px] leading-[2.15] text-slate-900 break-words ${
+          className={`text-[1em] leading-[2.15] text-slate-900 break-words ${
             para.isHeading ? 'font-semibold text-slate-950 tracking-[-0.01em]' : ''
           }`}
         >
@@ -482,8 +489,50 @@ export const NormalizedDocumentView: React.FC<NormalizedDocumentViewProps> = ({
       <div
         ref={contentRef}
         onCopy={handleNativeCopy}
+        style={{
+          fontSize: `${Math.round(16 * (zoomPercent / 100))}px`,
+          fontFamily: examStyle
+            ? `"${examStyle.fontFamily}", "Plus Jakarta Sans", serif`
+            : undefined,
+        }}
         className="print-only-document select-text space-y-2 pb-6"
       >
+        {examHeader && hasAnyHeaderContent(examHeader) && (
+          <div className="mb-4 grid grid-cols-12 gap-4 border-b border-slate-700 pb-3 text-center text-[15px] text-slate-950">
+            <div className="col-span-5 space-y-0.5">
+              {examHeader.schoolName.trim() && (
+                <div className="font-bold uppercase">{examHeader.schoolName.trim()}</div>
+              )}
+              {examHeader.department.trim() && (
+                <div className="font-bold">{examHeader.department.trim()}</div>
+              )}
+              {examHeader.schoolYear.trim() && (
+                <div>Năm học: {examHeader.schoolYear.trim()}</div>
+              )}
+            </div>
+            <div className="col-span-7 space-y-0.5">
+              {examHeader.examTitle.trim() && (
+                <div className="font-bold uppercase">{examHeader.examTitle.trim()}</div>
+              )}
+              {(examHeader.subject.trim() || examHeader.grade.trim()) && (
+                <div className="font-bold">
+                  {[
+                    examHeader.subject.trim() ? `Môn: ${examHeader.subject.trim()}` : '',
+                    examHeader.grade.trim() ? `Khối: ${examHeader.grade.trim()}` : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' – ')}
+                </div>
+              )}
+              {examHeader.duration.trim() && (
+                <div className="italic">Thời gian làm bài: {examHeader.duration.trim()}</div>
+              )}
+              {examHeader.examCode.trim() && (
+                <div className="font-bold">Mã đề: {examHeader.examCode.trim()}</div>
+              )}
+            </div>
+          </div>
+        )}
         {document.blocks.map((block: DocumentBlock) =>
           block.type === 'paragraph' ? renderParagraph(block) : renderTable(block)
         )}
