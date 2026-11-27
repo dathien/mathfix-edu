@@ -30,10 +30,9 @@
   align-items: center;
   vertical-align: middle;
   max-width: 100%;
-  overflow-x: auto;
-  overflow-y: visible;
-  padding: 4px 6px;
-  margin: 2px 1px;
+  overflow: visible;
+  padding: 3px 5px;
+  margin: 1px 1px;
   border-radius: 6px;
   transition: background-color 140ms ease, box-shadow 140ms ease;
 }
@@ -41,25 +40,24 @@
 .mathfix-formula-display {
   display: block;
   width: 100%;
-  overflow-x: auto;
-  overflow-y: visible;
-  padding: 14px 16px;
+  overflow: visible;
+  padding: 12px 14px;
   margin: 10px 0;
-  text-align: center;
   border-radius: 8px;
   transition: background-color 140ms ease, box-shadow 140ms ease;
 }
 
 .mathfix-svg-host {
   display: inline-block;
+  flex-shrink: 0;
   line-height: 1.2;
-  font-size: 1.34em;
+  font-size: 1.32em;
   color: #0F172A;
   padding: 2px 0;
 }
 
 .mathfix-formula-display .mathfix-svg-host {
-  font-size: 1.52em;
+  font-size: 1.46em;
   padding: 4px 0;
 }
 
@@ -67,6 +65,76 @@
   display: inline-block;
   vertical-align: middle;
   max-width: none;
+  overflow: visible;
+}
+
+/* Shared ResponsiveFormula Component — zero clipping, exact aspect ratio */
+.mathfix-responsive-block {
+  position: relative;
+  display: block;
+  width: 100%;
+  font-size: 1.24rem;
+  color: #0F172A;
+}
+
+.mathfix-formula-display .mathfix-responsive-block {
+  font-size: 1.44em;
+}
+
+.mathfix-responsive-inline {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  max-width: 100%;
+  font-size: 1.28em;
+  color: #0F172A;
+}
+
+.mathfix-responsive-block .mathfix-svg-host,
+.mathfix-responsive-inline .mathfix-svg-host {
+  font-size: 1em;
+}
+
+.mathfix-ex-probe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 10ex;
+  height: 0;
+  visibility: hidden;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.mathfix-responsive-stage {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: inherit;
+}
+
+.mathfix-responsive-stage.mathfix-align-center > .mathfix-svg-host {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.mathfix-responsive-stage.mathfix-align-left > .mathfix-svg-host {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+.mathfix-svg-host.mathfix-svg-scaled {
+  display: inline-block;
+  padding: 0;
+  line-height: 0;
+}
+
+.mathfix-svg-host.mathfix-svg-scaled > svg {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  display: block;
   overflow: visible;
 }
 
@@ -79,8 +147,10 @@ math-field {
   background: #FFFFFF;
   color: #0F172A;
   width: 100%;
+  max-width: 100%;
   min-height: 64px;
   outline: none;
+  overflow-x: auto;
   --caret-color: #0B4F8A;
   --selection-background-color: rgba(11, 79, 138, 0.16);
   --contains-highlight-background-color: rgba(11, 79, 138, 0.06);

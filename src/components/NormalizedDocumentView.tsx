@@ -30,6 +30,7 @@ import { FigureAlignment, FigureAsset } from '../engine/figureTypes';
 import { sanitizeSvgMarkup } from '../engine/svgSanitizer';
 import { buildSelectionExportPair } from '../engine/clipboardExport';
 import { ExamHeaderConfig, ExamStyleSettings, hasAnyHeaderContent } from '../engine/examTools';
+import { ResponsiveFormula } from './ResponsiveFormula';
 
 interface NormalizedDocumentViewProps {
   document: ProcessedDocument | null;
@@ -275,9 +276,11 @@ export const NormalizedDocumentView: React.FC<NormalizedDocumentViewProps> = ({
         className={cls}
       >
         {seg.validated && seg.svg ? (
-          <span
-            className="mathfix-svg-host"
-            dangerouslySetInnerHTML={{ __html: seg.svg }}
+          <ResponsiveFormula
+            svg={seg.svg}
+            inline={!seg.displayMode}
+            minScale={0.72}
+            align="center"
           />
         ) : (
           <span className="inline-flex items-center gap-1.5 font-mono text-sm text-red-700">
@@ -705,11 +708,13 @@ export const NormalizedDocumentView: React.FC<NormalizedDocumentViewProps> = ({
                     </div>
                     <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
                       <div className="text-xs text-slate-500 mb-1">Sau (chuẩn hóa)</div>
-                      <div className="overflow-x-auto py-0.5">
+                      <div className="py-1">
                         {f.validated && f.svg ? (
-                          <div
-                            className="mathfix-svg-host"
-                            dangerouslySetInnerHTML={{ __html: f.svg }}
+                          <ResponsiveFormula
+                            svg={f.svg}
+                            baseFontSize="1.2rem"
+                            minScale={0.72}
+                            align="left"
                           />
                         ) : (
                           <span className="font-mono text-xs text-red-700">{f.errorMessage || f.activeLatex}</span>

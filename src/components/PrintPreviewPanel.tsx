@@ -4,6 +4,7 @@ import { FigureSegment, InlineSegment, ProcessedDocument } from '../engine/types
 import { FigureAsset } from '../engine/figureTypes';
 import { sanitizeSvgMarkup } from '../engine/svgSanitizer';
 import { ExamHeaderConfig, ExamStyleSettings, hasAnyHeaderContent } from '../engine/examTools';
+import { ResponsiveFormula } from './ResponsiveFormula';
 
 interface PrintPreviewPanelProps {
   open: boolean;
@@ -246,10 +247,13 @@ export const PrintPreviewPanel: React.FC<PrintPreviewPanelProps> = ({
                                       ) : seg.type === 'figure' ? (
                                         renderPrintFigure(seg, true)
                                       ) : seg.validated && seg.svg ? (
-                                        <span
+                                        <ResponsiveFormula
                                           key={seg.id}
-                                          className="mathfix-svg-host mx-0.5 inline-block align-middle"
-                                          dangerouslySetInnerHTML={{ __html: seg.svg }}
+                                          svg={seg.svg}
+                                          inline
+                                          minScale={0.68}
+                                          noScrollbar
+                                          className="mx-0.5"
                                         />
                                       ) : (
                                         <span key={seg.id} className="font-mono text-xs">
@@ -307,15 +311,23 @@ export const PrintPreviewPanel: React.FC<PrintPreviewPanelProps> = ({
                       }
 
                       if (seg.validated && seg.svg) {
-                        return (
-                          <span
+                        return seg.displayMode ? (
+                          <div key={seg.id} className="my-2">
+                            <ResponsiveFormula
+                              svg={seg.svg}
+                              minScale={0.68}
+                              align="center"
+                              noScrollbar
+                            />
+                          </div>
+                        ) : (
+                          <ResponsiveFormula
                             key={seg.id}
-                            className={
-                              seg.displayMode
-                                ? 'mathfix-svg-host my-2 block text-center'
-                                : 'mathfix-svg-host mx-0.5 inline-block align-middle'
-                            }
-                            dangerouslySetInnerHTML={{ __html: seg.svg }}
+                            svg={seg.svg}
+                            inline
+                            minScale={0.68}
+                            noScrollbar
+                            className="mx-0.5"
                           />
                         );
                       }

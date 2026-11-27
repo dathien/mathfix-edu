@@ -28,6 +28,7 @@ import { copyFormulaAs } from '../engine/clipboardExport';
 import { exportSingleFormulaDocx } from '../engine/docxExporter';
 import { PERIODIC_TABLE, searchPeriodicElements } from '../data/periodicTable';
 import { GradeLevel, LibraryFormulaItem } from '../data/formulaLibraryData';
+import { ResponsiveFormula } from './ResponsiveFormula';
 
 interface FormulaStudioPanelProps {
   open: boolean;
@@ -848,15 +849,16 @@ export const FormulaStudioPanel: React.FC<FormulaStudioPanelProps> = ({
                 <span className="text-red-600">Chưa hợp lệ</span>
               )}
             </div>
-            <div className="mt-1.5 flex min-h-[44px] items-center justify-center overflow-x-auto py-1">
+            <div className="mt-1.5 flex min-h-[54px] items-center py-1">
               {livePreview.ok && livePreview.svg ? (
-                <div
-                  className="mathfix-svg-host"
-                  style={{ fontSize: '1.28rem' }}
-                  dangerouslySetInnerHTML={{ __html: livePreview.svg }}
+                <ResponsiveFormula
+                  svg={livePreview.svg}
+                  baseFontSize="1.28rem"
+                  minScale={0.72}
+                  align="center"
                 />
               ) : (
-                <span className="text-sm text-slate-400">
+                <span className="mx-auto text-[15px] text-slate-400">
                   {latex.trim() ? livePreview.error || 'Đang kiểm tra cú pháp...' : 'Chọn mẫu bên dưới hoặc gõ trực tiếp'}
                 </span>
               )}

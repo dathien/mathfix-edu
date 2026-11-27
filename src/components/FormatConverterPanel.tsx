@@ -24,6 +24,7 @@ import {
   copyPlainText,
   svgToPngBlob,
 } from '../engine/clipboardExport';
+import { ResponsiveFormula } from './ResponsiveFormula';
 
 interface FormatConverterPanelProps {
   open: boolean;
@@ -384,20 +385,22 @@ export const FormatConverterPanel: React.FC<FormatConverterPanelProps> = ({
               <div className="text-xs font-medium text-slate-500 mb-2">
                 Công thức nguồn đang chọn
               </div>
-              <div className="flex min-h-[76px] items-center justify-center overflow-x-auto rounded-md bg-white border border-slate-200 p-3">
+              <div className="flex min-h-[76px] items-center rounded-md bg-white border border-slate-200 p-3">
                 {format === 'png' && pngPreviewUrl ? (
                   <img
                     src={pngPreviewUrl}
                     alt="Xem trước ảnh PNG công thức"
-                    className="max-h-28 max-w-full object-contain"
+                    className="mx-auto max-h-28 max-w-full object-contain"
                   />
                 ) : activeFormula.validated && activeFormula.svg ? (
-                  <div
-                    className="mathfix-svg-host"
-                    dangerouslySetInnerHTML={{ __html: activeFormula.svg }}
+                  <ResponsiveFormula
+                    svg={activeFormula.svg}
+                    baseFontSize="1.24rem"
+                    minScale={0.72}
+                    align="center"
                   />
                 ) : (
-                  <span className="font-mono text-sm text-red-700">
+                  <span className="mx-auto font-mono text-sm text-red-700">
                     {activeFormula.activeLatex || activeFormula.raw}
                   </span>
                 )}
